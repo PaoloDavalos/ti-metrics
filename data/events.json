@@ -1,0 +1,6 @@
+[
+    {"id": 2, "ip": "1.1.1.1", "status_code": 500, "cpu": 95, "memoria": 85},
+    {"id": 6, "ip": "8.8.8.8", "status_code": 500, "cpu": 80, "memoria": 75},
+    {"id": 7, "ip": "9.9.9.9", "status_code": 200, "cpu": 45, "memoria": 60},
+    {"id": 8, "ip": "", "status_code": 200, "cpu": 20, "memoria": 30}
+]
