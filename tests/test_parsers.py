@@ -2,9 +2,10 @@ import json
 
 import pytest
 
-from src.parsers.lector_csv import leer_logs_csv
-from src.parsers.lector_json import leer_eventos_json
-from src.utils.validacion import normalizar_evento
+from src.parsers.base_parser import BaseLogParser
+from src.parsers.lector_csv import CSVLogParser, leer_logs_csv
+from src.parsers.lector_json import JSONLogParser, leer_eventos_json
+from src.utils.validacion import ValidadorEventos, normalizar_evento
 
 
 def evento_base():
@@ -12,6 +13,27 @@ def evento_base():
         "id": 1, "ip": "8.8.8.8", "status_code": 200,
         "cpu": 25, "memoria": 40,
     }
+
+
+def test_parser_base_es_abstracto():
+    with pytest.raises(TypeError, match="parse"):
+        BaseLogParser()
+
+
+@pytest.mark.parametrize("clase,nombre,contenido", [
+    (CSVLogParser, "logs.csv", "id,ip,status_code,cpu,memoria\n"
+     "1,8.8.8.8,200,25,40\n2,1.1.1.1,200,25,40,sobra\n"),
+    (JSONLogParser, "events.json", '[{"id": 1, "ip": "8.8.8.8", '
+     '"status_code": 200, "cpu": 25, "memoria": 40}, null]'),
+])
+def test_los_lectores_comparten_el_contrato_parse(tmp_path, clase, nombre, contenido):
+    ruta = tmp_path / nombre
+    ruta.write_text(contenido, encoding="utf-8")
+    parser = clase(ValidadorEventos())
+    assert isinstance(parser, BaseLogParser)
+    assert parser.parse(ruta) == ([
+        {"id": "1", "ip": "8.8.8.8", "status_code": 200, "cpu": 25.0, "memoria": 40.0}
+    ], 1)
 
 
 def test_csv_normaliza_y_descarta_fila_invalida(tmp_path):

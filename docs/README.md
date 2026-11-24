@@ -1,3 +1,3 @@
 # Documentación
 
-Carpeta reservada para el diagrama UML del Hito 2.
+[Diagrama de clases del Hito 2](diagrama_clases.md).

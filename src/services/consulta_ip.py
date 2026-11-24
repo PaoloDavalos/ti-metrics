@@ -3,55 +3,70 @@
 import requests
 
 
+class ClienteUbicacion:
+    def __init__(self):
+        self.__timeout = 5
+
+    @property
+    def timeout(self):
+        return self.__timeout
+
+    def consultar(self, ip):
+        """Devuelve la ubicación y si se alcanzó el límite de consultas."""
+        ubicacion = {"estado": "no_disponible", "pais": None, "ciudad": None}
+        detener = False
+        try:
+            respuesta = requests.get(
+                "http://ip-api.com/json/" + ip,
+                params={"fields": "status,country,city", "lang": "es"},
+                timeout=self.timeout,
+            )
+            # Deja de consultar cuando se alcanza el límite de la API.
+            detener = (
+                respuesta.headers.get("X-Rl") == "0"
+                or respuesta.status_code == 429
+            )
+            respuesta.raise_for_status()
+            datos = respuesta.json()
+            if (
+                isinstance(datos, dict)
+                and datos.get("status") == "success"
+                and isinstance(datos.get("country"), str)
+                and isinstance(datos.get("city"), str)
+            ):
+                ubicacion = {
+                    "estado": "consultada",
+                    "pais": datos["country"],
+                    "ciudad": datos["city"],
+                }
+        except (requests.RequestException, ValueError):
+            pass
+        return ubicacion, detener
+
+    def obtener_ubicaciones(self, eventos, usar_api=True):
+        """Guarda un resultado por IP para evitar consultas repetidas."""
+        geografia = {}
+        detener = False
+        consultas = 0
+        for evento in eventos:
+            ip = evento["ip"]
+            if ip in geografia:
+                continue
+            if not usar_api:
+                geografia[ip] = {"estado": "omitida", "pais": None, "ciudad": None}
+            elif detener or consultas >= 45:
+                geografia[ip] = {
+                    "estado": "pendiente_por_limite", "pais": None, "ciudad": None,
+                }
+            else:
+                geografia[ip], detener = self.consultar(ip)
+                consultas += 1
+        return geografia
+
+
 def consultar_geografia(ip):
-    """Devuelve la ubicación y si se alcanzó el límite de consultas."""
-    ubicacion = {"estado": "no_disponible", "pais": None, "ciudad": None}
-    detener = False
-    try:
-        respuesta = requests.get(
-            "http://ip-api.com/json/" + ip,
-            params={"fields": "status,country,city", "lang": "es"},
-            timeout=5,
-        )
-        # Deja de consultar cuando se alcanza el límite de la API.
-        detener = (
-            respuesta.headers.get("X-Rl") == "0"
-            or respuesta.status_code == 429
-        )
-        respuesta.raise_for_status()
-        datos = respuesta.json()
-        if (
-            isinstance(datos, dict)
-            and datos.get("status") == "success"
-            and isinstance(datos.get("country"), str)
-            and isinstance(datos.get("city"), str)
-        ):
-            ubicacion = {
-                "estado": "consultada",
-                "pais": datos["country"],
-                "ciudad": datos["city"],
-            }
-    except (requests.RequestException, ValueError):
-        pass
-    return ubicacion, detener
+    return ClienteUbicacion().consultar(ip)
 
 
 def enriquecer_ips(eventos, usar_api=True):
-    """Guarda un resultado por IP para evitar consultas repetidas."""
-    geografia = {}
-    detener = False
-    consultas = 0
-    for evento in eventos:
-        ip = evento["ip"]
-        if ip in geografia:
-            continue
-        if not usar_api:
-            geografia[ip] = {"estado": "omitida", "pais": None, "ciudad": None}
-        elif detener or consultas >= 45:
-            geografia[ip] = {
-                "estado": "pendiente_por_limite", "pais": None, "ciudad": None,
-            }
-        else:
-            geografia[ip], detener = consultar_geografia(ip)
-            consultas += 1
-    return geografia
+    return ClienteUbicacion().obtener_ubicaciones(eventos, usar_api)

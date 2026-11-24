@@ -4,8 +4,8 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from src.main import procesar_archivos
-from src.services.consulta_ip import consultar_geografia, enriquecer_ips
+from src.main import main, procesar_archivos
+from src.services.consulta_ip import ClienteUbicacion, consultar_geografia, enriquecer_ips
 from src.services.metricas import deduplicar_eventos, generar_reporte
 from src.utils.persistencia import guardar_reporte_json
 
@@ -72,6 +72,31 @@ def test_api_correcta_y_timeout_configurado():
         params={"fields": "status,country,city", "lang": "es"},
         timeout=5,
     )
+
+
+def test_timeout_es_una_propiedad_de_solo_lectura():
+    cliente = ClienteUbicacion()
+    assert cliente.timeout == 5
+    with pytest.raises(AttributeError):
+        cliente.timeout = 1
+    assert cliente.timeout == 5
+
+
+def test_cliente_reinicia_el_limite_y_las_ubicaciones_en_cada_ejecucion():
+    cliente = ClienteUbicacion()
+    primera = respuesta_api({"status": "success", "country": "Ecuador", "city": "Quito"}, cuota="0")
+    segunda = respuesta_api({"status": "success", "country": "Perú", "city": "Lima"})
+    eventos = [evento(1), evento(2)]
+    eventos[1]["ip"] = "1.1.1.1"
+
+    with patch("src.services.consulta_ip.requests.get", side_effect=[primera, segunda, segunda]) as peticion:
+        inicial = cliente.obtener_ubicaciones(eventos)
+        siguiente = cliente.obtener_ubicaciones(eventos)
+
+    assert inicial["1.1.1.1"]["estado"] == "pendiente_por_limite"
+    assert siguiente["1.1.1.1"]["estado"] == "consultada"
+    assert siguiente["8.8.8.8"]["ciudad"] == "Lima"
+    assert peticion.call_count == 3
 
 
 @pytest.mark.parametrize("error", [requests.Timeout, requests.ConnectionError])
@@ -200,3 +225,53 @@ def test_procesamiento_con_api_fallida_conserva_metricas(tmp_path):
     assert reporte["ips_criticas"] == ["1.1.1.1", "8.8.8.8", "9.9.9.9"]
     for ubicacion in reporte["geografia_por_ip"].values():
         assert ubicacion == {"estado": "no_disponible", "pais": None, "ciudad": None}
+
+
+@pytest.mark.parametrize("opcion,estado,consultas", [
+    ("1", "consultada", 2),
+    ("2", "omitida", 0),
+])
+def test_menu_genera_reporte_completo(tmp_path, monkeypatch, opcion, estado, consultas):
+    datos = tmp_path / "data"
+    datos.mkdir()
+    (datos / "logs.csv").write_text(
+        "id,ip,status_code,cpu,memoria\n2,8.8.8.8,500,25,40\n", encoding="utf-8",
+    )
+    primero = evento(2, estado=500)
+    otro = evento(1, memoria=90)
+    otro["ip"] = "1.1.1.1"
+    (datos / "events.json").write_text(
+        json.dumps([dict(primero, id=2, status_code=200), otro, None]), encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    respuesta = respuesta_api({"status": "success", "country": "Ecuador", "city": "Quito"})
+    with patch("builtins.input", return_value=opcion):
+        with patch("src.services.consulta_ip.requests.get", return_value=respuesta) as peticion:
+            assert main() is True
+    assert peticion.call_count == consultas
+
+    ubicacion = {"estado": estado, "pais": None, "ciudad": None}
+    if opcion == "1":
+        ubicacion.update(pais="Ecuador", ciudad="Quito")
+    assert json.loads((datos / "reporte.json").read_text(encoding="utf-8")) == {
+        "total_eventos": 2,
+        "eventos_invalidos": 1,
+        "eventos_duplicados": 1,
+        "errores_http_500": 1,
+        "porcentaje_http_500": 50.0,
+        "cpu_promedio_porcentaje": 25.0,
+        "memoria_promedio_porcentaje": 65.0,
+        "ips_criticas": ["1.1.1.1", "8.8.8.8"],
+        "geografia_por_ip": {"8.8.8.8": ubicacion, "1.1.1.1": ubicacion},
+        "eventos_procesados": [primero, otro],
+    }
+
+
+def test_json_ilegible_detiene_el_flujo_antes_de_consultar(tmp_path):
+    entrada = tmp_path / "events.json"
+    entrada.write_bytes(b"\xff")
+    salida = tmp_path / "reporte.json"
+    with patch("src.services.consulta_ip.requests.get") as peticion:
+        assert procesar_archivos("data/logs.csv", entrada, salida, usar_api=True) is False
+    peticion.assert_not_called()
+    assert not salida.exists()

@@ -82,3 +82,34 @@ Este archivo reúne las consultas sobre el Hito 1 de TI-Metrics.
 - **Respuesta de la IA:** Utiliza unittest.mock.patch para sustituir requests.get durante las pruebas. Simula respuestas correctas, errores de conexión, timeouts y JSON inválido.
 - **Análisis Crítico:** Las pruebas que dependen de una API real pueden fallar por problemas externos. Con respuestas simuladas se puede revisar cómo responde el programa en cada caso.
 - **Solución Final Aplicada:** Las pruebas del cliente usan respuestas simuladas y comprueban tanto el resultado correcto como los errores previstos.
+
+## Hito 2 — Prompts
+
+Los tres prompts de este bloque son reconstrucciones breves de las etapas del Hito 2. La fecha se asignó para la bitácora.
+
+### Registro de Prompt # 10
+
+- **Fecha:** 2026-11-18
+- **Módulo/Función:** Diagnóstico y diseño del flujo orientado a objetos.
+- **Prompt Enviado:** Revisa el flujo del Hito 1 y propón qué clases deberían encargarse de la lectura, la validación, las métricas y el reporte. ¿Qué comportamiento debemos conservar?
+- **Respuesta de la IA:** Propuso una jerarquía de lectores, un validador común, un procesador para la deduplicación y las métricas, un cliente de ubicación, un repositorio para guardar el JSON y una clase para coordinar la consola.
+- **Análisis Crítico:** Mantener los eventos como diccionarios y conservar el resultado de cada lector como una tupla permite cambiar la organización interna sin alterar la validación ni el formato del reporte. El comando, el menú y la prioridad del CSV son parte del comportamiento que debía conservarse.
+- **Solución Final Aplicada:** `AplicacionTIMetrics` coordina los lectores, `ProcesadorEventos`, `ClienteUbicacion` y `RepositorioReporteJSON`. Los lectores comparten `ValidadorEventos`. El punto de entrada sigue siendo `python -m src.main`.
+
+### Registro de Prompt # 11
+
+- **Fecha:** 2026-11-18
+- **Módulo/Función:** Jerarquía de lectores, coordinación y encapsulamiento del cliente.
+- **Prompt Enviado:** Implementa BaseLogParser, CSVLogParser y JSONLogParser. ¿Cómo podemos llamar a parse(ruta) desde el mismo bucle y conservar la prioridad del CSV cuando se repite un id? Aplica también encapsulamiento al timeout de ClienteUbicacion.
+- **Respuesta de la IA:** Propuso declarar `parse(ruta)` como método abstracto, implementar la lectura en cada subclase y recorrer los pares de lector y ruta con el CSV primero. Para el cliente propuso guardar los cinco segundos en un atributo privado y leerlos con una propiedad sin setter.
+- **Análisis Crítico:** Un único bucle puede usar ambos lectores porque devuelven eventos válidos y la cantidad de inválidos. El orden importa porque la deduplicación conserva el primer evento de cada identificador. La propiedad permite leer el timeout sin cambiarlo mediante la interfaz pública.
+- **Solución Final Aplicada:** `CSVLogParser` y `JSONLogParser` heredan de `BaseLogParser`. La aplicación llama a `parser.parse(ruta)` en un bucle que procesa primero el CSV. `ClienteUbicacion` guarda `__timeout = 5` y la petición usa `self.timeout`. El límite de 45 consultas y las detenciones por HTTP 429 o `X-Rl: 0` siguen aplicándose en cada ejecución.
+
+### Registro de Prompt # 12
+
+- **Fecha:** 2026-11-18
+- **Módulo/Función:** Diagrama de clases, pruebas y compatibilidad del reporte.
+- **Prompt Enviado:** Genera el diagrama Mermaid a partir de las clases implementadas y comprueba que la CLI produce el mismo reporte sin API que en el Hito 1.
+- **Respuesta de la IA:** Propuso documentar las clases y sus relaciones en Mermaid y comparar el JSON completo de la CLI con una referencia temporal del Hito 1. Para los casos con API usó respuestas simuladas.
+- **Análisis Crítico:** Comparar el reporte completo detecta cambios en las claves, los valores y el orden de los eventos. Esa comparación sin API comprueba la compatibilidad del archivo. Las pruebas con respuestas simuladas comprueban el comportamiento de las consultas y sus fallos sin depender del servicio externo.
+- **Solución Final Aplicada:** El diagrama quedó en [docs/diagrama_clases.md](docs/diagrama_clases.md) y se comprobó su renderizado con Mermaid. El reporte de la CLI sin API coincidió byte por byte con la referencia del Hito 1, incluidas las diez claves y el orden de los eventos. Las pruebas con respuestas simuladas comprobaron las consultas y que un fallo de la API permite guardar las métricas locales.
